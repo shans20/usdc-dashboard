@@ -264,22 +264,44 @@ with col_eps_proj:
 st.sidebar.header("Scenario Builder")
 st.sidebar.caption("Override thesis assumptions to model scenarios")
 
-custom_supply = st.sidebar.slider("USDC Supply ($B)", 40.0, 200.0, usdc_supply_bn, 1.0)
+custom_supply = st.sidebar.slider("USDC Supply ($B)", 40.0, 1000.0, usdc_supply_bn, 5.0)
 custom_yield = st.sidebar.slider("Reserve Yield (%)", 1.0, 6.0, reserve_yield, 0.1)
 custom_cb_pct = st.sidebar.slider("CB On-Platform %", 0.05, 0.40, THESIS["cb_on_platform_pct_of_usdc"], 0.01)
 custom_cd_pct = st.sidebar.slider("Circle-Direct %", 0.0, 0.50, buckets["circle_direct_pct"], 0.01)
 
+st.sidebar.markdown("---")
+st.sidebar.markdown("### Transaction Revenue")
+st.sidebar.caption("Model CPN, x402, cross-border, FX — revenue that scales with USDC velocity")
+custom_txn_rev = st.sidebar.slider("Transaction Revenue ($mm/yr)", 0, 5000, THESIS["other_revenue_annual_mm"], 50)
+custom_txn_margin = st.sidebar.slider("Transaction Margin (%)", 10, 95, 70, 5)
+txn_contribution_mm = custom_txn_rev * custom_txn_margin / 100
+
+# Run scenario with custom other_revenue override
 custom_2b = estimate_rldc(custom_supply, custom_yield, custom_cb_pct)
 custom_3b = estimate_rldc_3bucket(custom_supply, custom_yield,
                                    circle_direct_bn=custom_supply * custom_cd_pct,
                                    coinbase_on_platform_pct=custom_cb_pct)
 
+# Override other revenue and recalculate earnings with txn revenue
+txn_rev_delta = custom_txn_rev - THESIS["other_revenue_annual_mm"]
+txn_profit_delta = txn_contribution_mm - THESIS["other_revenue_annual_mm"] * 0.70  # assume 70% base margin
+scenario_total_rev = custom_3b["total_revenue_mm"] + txn_rev_delta
+scenario_rldc = custom_3b["rldc_mm"] + txn_rev_delta  # txn rev doesn't go through CB distribution
+scenario_rldc_margin = scenario_rldc / scenario_total_rev if scenario_total_rev > 0 else 0
+scenario_ebitda = scenario_rldc - THESIS["adj_opex_annual_mm"]
+scenario_pretax = scenario_ebitda - THESIS["da_annual_mm"] - THESIS["normalized_sbc_annual_mm"]
+scenario_tax = max(0, scenario_pretax * THESIS["tax_rate"])
+scenario_net = scenario_pretax - scenario_tax
+scenario_gaap_eps = scenario_net / THESIS["diluted_shares_mm"]
+scenario_adj_eps = (scenario_net + THESIS["normalized_sbc_annual_mm"] * (1 - THESIS["tax_rate"])) / THESIS["diluted_shares_mm"]
+
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Scenario Results")
-st.sidebar.metric("Revenue", f"${custom_2b['total_revenue_mm']:,.0f}mm")
-st.sidebar.metric("RLDC Margin (2B)", f"{custom_2b['rldc_margin']:.1%}")
-st.sidebar.metric("RLDC Margin (3B)", f"{custom_3b['rldc_margin']:.1%}")
-st.sidebar.metric("Adj EPS (3B)", f"${custom_3b['adj_eps']:.2f}")
+st.sidebar.metric("Total Revenue", f"${scenario_total_rev:,.0f}mm")
+st.sidebar.metric("Txn Contribution", f"${txn_contribution_mm:,.0f}mm", f"at {custom_txn_margin}% margin")
+st.sidebar.metric("RLDC Margin", f"{scenario_rldc_margin:.1%}")
+st.sidebar.metric("Adj EBITDA", f"${scenario_ebitda:,.0f}mm")
+st.sidebar.metric("Adj EPS", f"${scenario_adj_eps:.2f}", f"GAAP: ${scenario_gaap_eps:.2f}")
 st.sidebar.metric("CB Savings", f"${custom_3b['cb_savings_mm']:,.0f}mm/yr")
 
 # ============================================================
